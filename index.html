@@ -3,19 +3,19 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="color-scheme" content="dark">
-<meta name="theme-color" content="#14151a">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#f4f5f8">
 <title>OKLCH Palette Picker</title>
 <style>
   :root {
-    color-scheme: dark;
-    --bg: #14151a;
-    --panel: #1d1f27;
-    --panel-2: #23252f;
-    --line: #32343f;
-    --text: #e7e8ee;
-    --muted: #9a9db0;
-    --accent: #7aa2ff;
+    color-scheme: light;
+    --bg: #f4f5f8;
+    --panel: #ffffff;
+    --panel-2: #eceef3;
+    --line: #d7dae2;
+    --text: #1a1c22;
+    --muted: #6b6f80;
+    --accent: #3b6fe0;
     --radius: 14px;
     --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
   }
@@ -25,7 +25,7 @@
     margin: 0;
     min-height: 100vh;
     background:
-      radial-gradient(1200px 600px at 15% -10%, #1b1d28 0%, transparent 60%),
+      radial-gradient(1200px 600px at 15% -10%, #e9ecf5 0%, transparent 60%),
       var(--bg);
     color: var(--text);
     font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
@@ -91,9 +91,9 @@
   .keywrap { display: flex; align-items: center; gap: 13px; margin-bottom: 18px; }
   .keyswatch {
     width: 66px; height: 66px; border-radius: 12px;
-    border: 1px solid rgba(255,255,255,.12);
+    border: 1px solid rgba(0,0,0,.12);
     flex: 0 0 auto;
-    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+    box-shadow: 0 6px 18px rgba(0,0,0,.18);
   }
   .keymeta { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.65; word-break: break-word; }
   .keymeta b { color: var(--text); font-weight: 600; }
@@ -109,23 +109,28 @@
   .ctrl-val { font-family: var(--mono); font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
   input[type=range] {
     -webkit-appearance: none; appearance: none;
-    width: 100%; height: 6px; border-radius: 4px;
+    width: 100%; height: 11px; border-radius: 6px;
     background: var(--panel-2); outline: none; margin: 0;
     touch-action: pan-y;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.08);
+  }
+  input[type=range]::-moz-range-track {
+    height: 11px; border-radius: 6px; background: transparent;
   }
   input[type=range]::-webkit-slider-thumb {
     -webkit-appearance: none; appearance: none;
     width: 22px; height: 22px; border-radius: 50%;
-    background: var(--accent); cursor: pointer;
-    border: 4px solid var(--panel);
-    box-shadow: 0 0 0 1px var(--line);
+    background: var(--panel); cursor: pointer;
+    border: 3px solid var(--panel);
+    box-shadow: 0 0 0 1px var(--line), 0 1px 4px rgba(0,0,0,.3);
+    margin-top: -6px;
   }
   input[type=range]::-moz-range-thumb {
     width: 22px; height: 22px; border-radius: 50%;
-    background: var(--accent); cursor: pointer; border: 4px solid var(--panel);
+    background: var(--panel); cursor: pointer; border: 3px solid var(--panel);
+    box-shadow: 0 0 0 1px var(--line), 0 1px 4px rgba(0,0,0,.3);
   }
   input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent); }
-  .hue-track { height: 11px; border-radius: 6px; margin: 9px 0 -3px; }
 
   /* Palette */
   .pal-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
@@ -207,7 +212,6 @@
         <span class="ctrl-val" id="v-hue">R</span>
       </div>
       <input type="range" id="s-hue" min="0" max="119" step="1" value="0">
-      <div class="hue-track" id="hue-track"></div>
     </div>
 
     <div class="ctrl">
@@ -299,10 +303,15 @@ function hexToOklch(hex){
   const lab = linearToOklab(srgbDecode(r), srgbDecode(g), srgbDecode(b));
   return oklabToOklch(lab.L, lab.a, lab.b);
 }
-function oklchToHex(L, C, H){
+function oklchToRgb255(L, C, H){
   const lin = oklchToLinear(L, C, H);
-  const to255 = (v) => Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, v))))) * 255).toString(16).padStart(2,'0');
-  return '#' + to255(lin.r) + to255(lin.g) + to255(lin.b);
+  const to = (v) => Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, v))))) * 255);
+  return { r: to(lin.r), g: to(lin.g), b: to(lin.b) };
+}
+function oklchToHex(L, C, H){
+  const { r, g, b } = oklchToRgb255(L, C, H);
+  const hx = (v) => v.toString(16).padStart(2,'0');
+  return '#' + hx(r) + hx(g) + hx(b);
 }
 const EPS = 1e-4;
 function inGamut(L, C, H){
@@ -314,15 +323,6 @@ function Cmax(H, L){
   let lo = 0, hi = 0.5;
   for (let i = 0; i < 30; i++){ const mid = (lo+hi)/2; if (inGamut(L, mid, H)) lo = mid; else hi = mid; }
   return lo;
-}
-function inGamutLspan(C, H, keyL){
-  let Lmin;
-  if (inGamut(0, C, H)) Lmin = 0;
-  else { let lo=0, hi=keyL; for (let i=0;i<30;i++){ const mid=(lo+hi)/2; if (inGamut(mid,C,H)) hi=mid; else lo=mid; } Lmin=hi; }
-  let Lmax;
-  if (inGamut(1, C, H)) Lmax = 1;
-  else { let lo=keyL, hi=1; for (let i=0;i<30;i++){ const mid=(lo+hi)/2; if (inGamut(mid,C,H)) lo=mid; else hi=mid; } Lmax=lo; }
-  return { Lmin, Lmax };
 }
 function gamutMap(L, C, H){
   if (inGamut(L, C, H)) return { L, C, H };
@@ -364,14 +364,15 @@ function keyColor(){
 /* ---- Generators ---- */
 function genLightness(key, N, range){
   if (N === 1) return [{ L:key.L, C:key.C, H:key.H }];
-  const { Lmin, Lmax } = inGamutLspan(key.C, key.H, key.L);
-  const w = (range/100) * (Lmax - Lmin);
+  const w = range/100;
   let lo = key.L - w/2, hi = key.L + w/2;
-  if (lo < Lmin) { hi += (Lmin - lo); lo = Lmin; }
-  if (hi > Lmax) { lo -= (hi - Lmax); hi = Lmax; }
-  if (lo < Lmin) lo = Lmin;
+  if (lo < 0) { lo = 0; hi = w; }
+  else if (hi > 1) { hi = 1; lo = 1 - w; }
   const out = [];
-  for (let i = 0; i < N; i++){ const t = i/(N-1); out.push({ L: lo + (hi-lo)*t, C:key.C, H:key.H }); }
+  for (let i = 0; i < N; i++){
+    const t = i/(N-1);
+    out.push(gamutMap(hi - (hi-lo)*t, key.C, key.H));
+  }
   return out;
 }
 function genHue(key, N, range){
@@ -384,7 +385,7 @@ function genChroma(key, N, range){
   if (N === 1) return [{ L:key.L, C:key.C, H:key.H }];
   const lastC = key.C * (1 - range/100);
   const out = [];
-  for (let i = 0; i < N; i++){ const t = i/(N-1); out.push({ L:key.L, C: key.C + (lastC-key.C)*t, H:key.H }); }
+  for (let i = 0; i < N; i++){ const t = i/(N-1); out.push({ L:key.L, C: lastC + (key.C-lastC)*t, H:key.H }); }
   return out;
 }
 function generate(){
@@ -401,20 +402,31 @@ function oklchCss(c){ return `oklch(${(c.L*100).toFixed(2)}% ${c.C.toFixed(4)} $
 
 /* ---- Rendering ---- */
 const el = (id) => document.getElementById(id);
-function renderHueTrack(){
-  const key = keyColor(); const stops = [];
-  for (let i = 0; i <= 12; i++){
-    const H = (i/12) * 360;
-    stops.push(oklchCss(gamutMap(key.L, Math.max(key.C, 0.08), H)) + ' ' + (i/12*100).toFixed(0) + '%');
+function railGradient(sampler, segments){
+  const stops = [];
+  for (let i = 0; i <= segments; i++){
+    const t = i / segments;
+    stops.push(oklchCss(sampler(t)) + ' ' + (t*100).toFixed(1) + '%');
   }
-  el('hue-track').style.background = `linear-gradient(90deg, ${stops.join(', ')})`;
+  return `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+function renderRails(){
+  const key = keyColor();
+  el('s-hue').style.background = railGradient(
+    (t) => gamutMap(key.L, Math.max(key.C, 0.08), t * 360), 24);
+  el('s-light').style.background = railGradient(
+    (t) => gamutMap(t, key.C, key.H), 24);
+  el('s-chroma').style.background = railGradient(
+    (t) => ({ L: key.L, C: t * key.Cmax, H: key.H }), 16);
 }
 function renderKey(){
   const key = keyColor();
+  const rgb = oklchToRgb255(key.L, key.C, key.H);
   el('keyswatch').style.background = oklchCss(key);
   el('keymeta').innerHTML =
     `<b>${stopToName(state.hueStop)}</b> · ${oklchString(key)}<br>` +
-    `hue ${key.H.toFixed(2)}° · Cmax ${key.Cmax.toFixed(4)} · ${oklchToHex(key.L, key.C, key.H)}`;
+    `hue ${key.H.toFixed(2)}° · Cmax ${key.Cmax.toFixed(4)}<br>` +
+    `${oklchToHex(key.L, key.C, key.H)} · rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
 }
 function contrastText(c){ return c.L > 0.6 ? '#111319' : '#f4f5fb'; }
 function renderPalette(){
@@ -451,7 +463,7 @@ function renderControls(){
   el('ctrl-range').classList.toggle('hidden', state.steps === 1);
   el('pal-title').textContent = state.mode.charAt(0).toUpperCase() + state.mode.slice(1) + ' palette';
 }
-function renderAll(){ renderControls(); renderHueTrack(); renderKey(); renderPalette(); }
+function renderAll(){ renderControls(); renderRails(); renderKey(); renderPalette(); }
 
 /* ---- Copy ---- */
 let toastTimer = null;
