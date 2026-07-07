@@ -1,0 +1,498 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#14151a">
+<title>OKLCH Palette Picker</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #14151a;
+    --panel: #1d1f27;
+    --panel-2: #23252f;
+    --line: #32343f;
+    --text: #e7e8ee;
+    --muted: #9a9db0;
+    --accent: #7aa2ff;
+    --radius: 14px;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(1200px 600px at 15% -10%, #1b1d28 0%, transparent 60%),
+      var(--bg);
+    color: var(--text);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 380px 1fr;
+    gap: 18px;
+    max-width: 1080px;
+    margin: 0 auto;
+    padding: 22px;
+    align-items: start;
+  }
+  @media (max-width: 780px) {
+    .app { grid-template-columns: 1fr; gap: 14px; padding: 14px; }
+  }
+
+  h1 { font-size: 17px; margin: 0 0 3px; letter-spacing: .2px; }
+  .sub { color: var(--muted); font-size: 12.5px; margin: 0 0 18px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 18px;
+  }
+  @media (max-width: 780px) {
+    .panel { padding: 15px; }
+    /* palette first on small screens so a tap on a control shows output nearby */
+    .controls { order: 1; }
+    .output { order: 2; }
+  }
+
+  /* Tabs */
+  .tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 18px;
+    background: var(--panel-2);
+    padding: 5px;
+    border-radius: 11px;
+  }
+  .tab {
+    flex: 1;
+    text-align: center;
+    padding: 11px 6px;
+    border-radius: 8px;
+    cursor: pointer;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    border: none;
+    background: transparent;
+    transition: background .12s, color .12s;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tab.active { background: var(--accent); color: #0b1020; }
+  .tab:not(.active):active { color: var(--text); }
+  .tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* Key swatch */
+  .keywrap { display: flex; align-items: center; gap: 13px; margin-bottom: 18px; }
+  .keyswatch {
+    width: 66px; height: 66px; border-radius: 12px;
+    border: 1px solid rgba(255,255,255,.12);
+    flex: 0 0 auto;
+    box-shadow: 0 6px 18px rgba(0,0,0,.35);
+  }
+  .keymeta { font-family: var(--mono); font-size: 12px; color: var(--muted); line-height: 1.65; word-break: break-word; }
+  .keymeta b { color: var(--text); font-weight: 600; }
+
+  /* Sliders */
+  .ctrl { margin-bottom: 17px; }
+  .ctrl.hidden { display: none; }
+  .ctrl-head {
+    display: flex; justify-content: space-between; align-items: baseline;
+    margin-bottom: 9px;
+  }
+  .ctrl-head label { font-size: 13px; font-weight: 600; }
+  .ctrl-val { font-family: var(--mono); font-size: 12px; color: var(--accent); font-variant-numeric: tabular-nums; }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 6px; border-radius: 4px;
+    background: var(--panel-2); outline: none; margin: 0;
+    touch-action: pan-y;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); cursor: pointer;
+    border: 4px solid var(--panel);
+    box-shadow: 0 0 0 1px var(--line);
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 22px; height: 22px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; border: 4px solid var(--panel);
+  }
+  input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent); }
+  .hue-track { height: 11px; border-radius: 6px; margin: 9px 0 -3px; }
+
+  /* Palette */
+  .pal-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+  .btn {
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 9px;
+    padding: 10px 13px; font-size: 12px; font-weight: 600; cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .btn:active { border-color: var(--accent); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .stack { display: flex; flex-direction: column; }
+  .swatch {
+    position: relative;
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 16px;
+    min-height: 68px;
+    cursor: pointer;
+    border-radius: 8px;
+    overflow: hidden;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .swatch:first-child { border-top-left-radius: 11px; border-top-right-radius: 11px; }
+  .swatch:last-child { border-bottom-left-radius: 11px; border-bottom-right-radius: 11px; }
+  .sw-hex {
+    font-family: var(--mono); font-size: 15px; font-weight: 700;
+    cursor: pointer; padding: 3px 7px; border-radius: 6px;
+    letter-spacing: .3px;
+  }
+  .sw-oklch {
+    font-family: var(--mono); font-size: 11px; opacity: .82;
+    cursor: pointer; padding: 3px 7px; border-radius: 6px; text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+  .sw-hex:active, .sw-oklch:active { background: rgba(0,0,0,.2); }
+
+  .delta {
+    display: flex; align-items: center; justify-content: center;
+    gap: 7px; height: 22px; color: var(--muted);
+    font-family: var(--mono); font-size: 11px; font-variant-numeric: tabular-nums;
+  }
+  .delta .bar { flex: 1; height: 1px; background: var(--line); max-width: 90px; }
+
+  .toast {
+    position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--accent); color: #0b1020; font-weight: 600; font-size: 13px;
+    padding: 11px 18px; border-radius: 9px; opacity: 0; pointer-events: none;
+    transition: opacity .18s, transform .18s; z-index: 10;
+    box-shadow: 0 8px 24px rgba(0,0,0,.4);
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+</style>
+
+<div class="app">
+  <!-- LEFT: controls -->
+  <section class="panel controls">
+    <h1>OKLCH Palette Picker</h1>
+    <p class="sub">Friendly, always-in-gamut controls over a perceptually-uniform color space.</p>
+
+    <div class="tabs" id="tabs">
+      <button class="tab active" data-mode="lightness">Lightness</button>
+      <button class="tab" data-mode="hue">Hue</button>
+      <button class="tab" data-mode="chroma">Chroma</button>
+    </div>
+
+    <div class="keywrap">
+      <div class="keyswatch" id="keyswatch"></div>
+      <div class="keymeta" id="keymeta"></div>
+    </div>
+
+    <div class="ctrl">
+      <div class="ctrl-head">
+        <label for="s-hue">Hue</label>
+        <span class="ctrl-val" id="v-hue">R</span>
+      </div>
+      <input type="range" id="s-hue" min="0" max="119" step="1" value="0">
+      <div class="hue-track" id="hue-track"></div>
+    </div>
+
+    <div class="ctrl">
+      <div class="ctrl-head">
+        <label for="s-light">Lightness</label>
+        <span class="ctrl-val" id="v-light">63</span>
+      </div>
+      <input type="range" id="s-light" min="0" max="100" step="1" value="63">
+    </div>
+
+    <div class="ctrl">
+      <div class="ctrl-head">
+        <label for="s-chroma">Chroma</label>
+        <span class="ctrl-val" id="v-chroma">100%</span>
+      </div>
+      <input type="range" id="s-chroma" min="0" max="100" step="1" value="100">
+    </div>
+
+    <div class="ctrl">
+      <div class="ctrl-head">
+        <label for="s-steps">Steps</label>
+        <span class="ctrl-val" id="v-steps">3</span>
+      </div>
+      <input type="range" id="s-steps" min="1" max="13" step="1" value="3">
+    </div>
+
+    <div class="ctrl" id="ctrl-range">
+      <div class="ctrl-head">
+        <label for="s-range">Range</label>
+        <span class="ctrl-val" id="v-range">60</span>
+      </div>
+      <input type="range" id="s-range" min="0" max="100" step="1" value="60">
+    </div>
+  </section>
+
+  <!-- RIGHT: palette -->
+  <section class="panel output">
+    <div class="pal-head">
+      <strong id="pal-title">Palette</strong>
+      <button class="btn" id="copy-all">Copy all as CSS</button>
+    </div>
+    <div class="stack" id="stack"></div>
+  </section>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+
+/* ---- Appendix A: color math ---- */
+function srgbDecode(c){ return c <= 0.04045 ? c/12.92 : Math.pow((c+0.055)/1.055, 2.4); }
+function srgbEncode(c){ return c <= 0.0031308 ? 12.92*c : 1.055*Math.pow(c, 1/2.4) - 0.055; }
+
+function linearToOklab(r, g, b){
+  const l = 0.4122214708*r + 0.5363325363*g + 0.0514459929*b;
+  const m = 0.2119034982*r + 0.6806995451*g + 0.1073969566*b;
+  const s = 0.0883024619*r + 0.2817188376*g + 0.6299787005*b;
+  const l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+  return {
+    L: 0.2104542553*l_ + 0.7936177850*m_ - 0.0040720468*s_,
+    a: 1.9779984951*l_ - 2.4285922050*m_ + 0.4505937099*s_,
+    b: 0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_
+  };
+}
+function oklabToLinear(L, a, b){
+  const l_ = L + 0.3963377774*a + 0.2158037573*b;
+  const m_ = L - 0.1055613458*a - 0.0638541728*b;
+  const s_ = L - 0.0894841775*a - 1.2914855480*b;
+  const l = l_*l_*l_, m = m_*m_*m_, s = s_*s_*s_;
+  return {
+    r:  4.0767416621*l - 3.3077115913*m + 0.2309699292*s,
+    g: -1.2684380046*l + 2.6097574011*m - 0.3413193965*s,
+    b: -0.0041960863*l - 0.7034186147*m + 1.7076147010*s
+  };
+}
+const DEG = 180/Math.PI, RAD = Math.PI/180;
+function oklabToOklch(L, a, b){
+  const C = Math.sqrt(a*a + b*b);
+  let H = Math.atan2(b, a) * DEG;
+  if (H < 0) H += 360;
+  return { L, C, H };
+}
+function oklchToOklab(L, C, H){ return { L, a: C*Math.cos(H*RAD), b: C*Math.sin(H*RAD) }; }
+function oklchToLinear(L, C, H){ const lab = oklchToOklab(L, C, H); return oklabToLinear(lab.L, lab.a, lab.b); }
+function hexToOklch(hex){
+  hex = hex.replace('#','');
+  const r = parseInt(hex.slice(0,2),16)/255, g = parseInt(hex.slice(2,4),16)/255, b = parseInt(hex.slice(4,6),16)/255;
+  const lab = linearToOklab(srgbDecode(r), srgbDecode(g), srgbDecode(b));
+  return oklabToOklch(lab.L, lab.a, lab.b);
+}
+function oklchToHex(L, C, H){
+  const lin = oklchToLinear(L, C, H);
+  const to255 = (v) => Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, v))))) * 255).toString(16).padStart(2,'0');
+  return '#' + to255(lin.r) + to255(lin.g) + to255(lin.b);
+}
+const EPS = 1e-4;
+function inGamut(L, C, H){
+  const { r, g, b } = oklchToLinear(L, C, H);
+  return r >= -EPS && r <= 1+EPS && g >= -EPS && g <= 1+EPS && b >= -EPS && b <= 1+EPS;
+}
+function Cmax(H, L){
+  if (!inGamut(L, 0, H)) return 0;
+  let lo = 0, hi = 0.5;
+  for (let i = 0; i < 30; i++){ const mid = (lo+hi)/2; if (inGamut(L, mid, H)) lo = mid; else hi = mid; }
+  return lo;
+}
+function inGamutLspan(C, H, keyL){
+  let Lmin;
+  if (inGamut(0, C, H)) Lmin = 0;
+  else { let lo=0, hi=keyL; for (let i=0;i<30;i++){ const mid=(lo+hi)/2; if (inGamut(mid,C,H)) hi=mid; else lo=mid; } Lmin=hi; }
+  let Lmax;
+  if (inGamut(1, C, H)) Lmax = 1;
+  else { let lo=keyL, hi=1; for (let i=0;i<30;i++){ const mid=(lo+hi)/2; if (inGamut(mid,C,H)) lo=mid; else hi=mid; } Lmax=lo; }
+  return { Lmin, Lmax };
+}
+function gamutMap(L, C, H){
+  if (inGamut(L, C, H)) return { L, C, H };
+  let lo = 0, hi = C;
+  for (let i = 0; i < 30; i++){ const mid=(lo+hi)/2; if (inGamut(L, mid, H)) lo=mid; else hi=mid; }
+  return { L, C: lo, H };
+}
+function deltaEok(c1, c2){
+  const a = oklchToOklab(c1.L, c1.C, c1.H), b = oklchToOklab(c2.L, c2.C, c2.H);
+  const dL = a.L-b.L, da = a.a-b.a, db = a.b-b.b;
+  return Math.sqrt(dL*dL + da*da + db*db);
+}
+
+/* ---- Hue anchors / naming ---- */
+const ANCHOR_NAMES = ['R','Y','G','C','B','M'];
+const HUE_BASE = hexToOklch('#ff0000').H;
+const SUBSTEPS = 20;
+const STOPS = ANCHOR_NAMES.length * SUBSTEPS;
+const DEG_PER_STOP = 360 / STOPS;
+function stopToHue(idx){ return ((HUE_BASE + idx * DEG_PER_STOP) % 360 + 360) % 360; }
+function stopToName(idx){
+  const anchor = Math.floor(idx / SUBSTEPS) % ANCHOR_NAMES.length;
+  const sub = idx % SUBSTEPS;
+  if (sub === 0) return ANCHOR_NAMES[anchor];
+  const next = (anchor + 1) % ANCHOR_NAMES.length;
+  return ANCHOR_NAMES[anchor] + (sub * 5) + ANCHOR_NAMES[next];
+}
+
+/* ---- State + key color ---- */
+const state = { mode:'lightness', hueStop:0, light:63, chromaPct:100, steps:3, range:60 };
+function keyColor(){
+  const H = stopToHue(state.hueStop);
+  const L = state.light / 100;
+  const cm = Cmax(H, L);
+  const C = (state.chromaPct / 100) * cm;
+  return { L, C, H, Cmax: cm };
+}
+
+/* ---- Generators ---- */
+function genLightness(key, N, range){
+  if (N === 1) return [{ L:key.L, C:key.C, H:key.H }];
+  const { Lmin, Lmax } = inGamutLspan(key.C, key.H, key.L);
+  const w = (range/100) * (Lmax - Lmin);
+  let lo = key.L - w/2, hi = key.L + w/2;
+  if (lo < Lmin) { hi += (Lmin - lo); lo = Lmin; }
+  if (hi > Lmax) { lo -= (hi - Lmax); hi = Lmax; }
+  if (lo < Lmin) lo = Lmin;
+  const out = [];
+  for (let i = 0; i < N; i++){ const t = i/(N-1); out.push({ L: lo + (hi-lo)*t, C:key.C, H:key.H }); }
+  return out;
+}
+function genHue(key, N, range){
+  const spacing = (range/100) * (360/N);
+  const out = [];
+  for (let i = 0; i < N; i++){ const H = ((key.H + i*spacing)%360 + 360)%360; out.push(gamutMap(key.L, key.C, H)); }
+  return out;
+}
+function genChroma(key, N, range){
+  if (N === 1) return [{ L:key.L, C:key.C, H:key.H }];
+  const lastC = key.C * (1 - range/100);
+  const out = [];
+  for (let i = 0; i < N; i++){ const t = i/(N-1); out.push({ L:key.L, C: key.C + (lastC-key.C)*t, H:key.H }); }
+  return out;
+}
+function generate(){
+  const key = keyColor(), N = state.steps, range = state.range;
+  if (N === 1) return [{ L:key.L, C:key.C, H:key.H }];
+  if (state.mode === 'hue') return genHue(key, N, range);
+  if (state.mode === 'chroma') return genChroma(key, N, range);
+  return genLightness(key, N, range);
+}
+
+/* ---- Formatting ---- */
+function oklchString(c){ return `oklch(${c.L.toFixed(4)} ${c.C.toFixed(4)} ${c.H.toFixed(2)})`; }
+function oklchCss(c){ return `oklch(${(c.L*100).toFixed(2)}% ${c.C.toFixed(4)} ${c.H.toFixed(2)})`; }
+
+/* ---- Rendering ---- */
+const el = (id) => document.getElementById(id);
+function renderHueTrack(){
+  const key = keyColor(); const stops = [];
+  for (let i = 0; i <= 12; i++){
+    const H = (i/12) * 360;
+    stops.push(oklchCss(gamutMap(key.L, Math.max(key.C, 0.08), H)) + ' ' + (i/12*100).toFixed(0) + '%');
+  }
+  el('hue-track').style.background = `linear-gradient(90deg, ${stops.join(', ')})`;
+}
+function renderKey(){
+  const key = keyColor();
+  el('keyswatch').style.background = oklchCss(key);
+  el('keymeta').innerHTML =
+    `<b>${stopToName(state.hueStop)}</b> · ${oklchString(key)}<br>` +
+    `hue ${key.H.toFixed(2)}° · Cmax ${key.Cmax.toFixed(4)} · ${oklchToHex(key.L, key.C, key.H)}`;
+}
+function contrastText(c){ return c.L > 0.6 ? '#111319' : '#f4f5fb'; }
+function renderPalette(){
+  const colors = generate(); const stack = el('stack'); stack.innerHTML = '';
+  const showDelta = true;
+  colors.forEach((c, i) => {
+    const hex = oklchToHex(c.L, c.C, c.H);
+    const sw = document.createElement('div');
+    sw.className = 'swatch'; sw.style.background = oklchCss(c); sw.style.color = contrastText(c);
+    const hexEl = document.createElement('span');
+    hexEl.className = 'sw-hex'; hexEl.textContent = hex; hexEl.title = 'Copy hex';
+    hexEl.onclick = (e) => { e.stopPropagation(); copy(hex, 'Copied ' + hex); };
+    const okEl = document.createElement('span');
+    okEl.className = 'sw-oklch'; okEl.textContent = oklchCss(c); okEl.title = 'Copy oklch()';
+    okEl.onclick = (e) => { e.stopPropagation(); copy(oklchCss(c), 'Copied oklch()'); };
+    sw.appendChild(hexEl); sw.appendChild(okEl);
+    sw.onclick = () => copy(hex, 'Copied ' + hex);
+    stack.appendChild(sw);
+    if (showDelta && i < colors.length - 1){
+      const d = deltaEok(colors[i], colors[i+1]);
+      const dRow = document.createElement('div');
+      dRow.className = 'delta';
+      dRow.innerHTML = `<span class="bar"></span>ΔE ${Math.round(d*100)}<span class="bar"></span>`;
+      stack.appendChild(dRow);
+    }
+  });
+}
+function renderControls(){
+  el('v-hue').textContent = stopToName(state.hueStop);
+  el('v-light').textContent = state.light;
+  el('v-chroma').textContent = state.chromaPct + '%';
+  el('v-steps').textContent = state.steps;
+  el('v-range').textContent = state.range;
+  el('ctrl-range').classList.toggle('hidden', state.steps === 1);
+  el('pal-title').textContent = state.mode.charAt(0).toUpperCase() + state.mode.slice(1) + ' palette';
+}
+function renderAll(){ renderControls(); renderHueTrack(); renderKey(); renderPalette(); }
+
+/* ---- Copy ---- */
+let toastTimer = null;
+function toast(msg){
+  const t = el('toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 1400);
+}
+function copy(text, msg){
+  const done = () => toast(msg || 'Copied');
+  if (navigator.clipboard && navigator.clipboard.writeText)
+    navigator.clipboard.writeText(text).then(done, () => fallbackCopy(text, done));
+  else fallbackCopy(text, done);
+}
+function fallbackCopy(text, done){
+  const ta = document.createElement('textarea');
+  ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch(e){}
+  document.body.removeChild(ta); done();
+}
+function copyAll(){
+  const colors = generate();
+  const lines = colors.map((c, i) => `  --color-${i+1}: ${oklchToHex(c.L, c.C, c.H)};`);
+  copy(':root {\n' + lines.join('\n') + '\n}', 'Copied ' + colors.length + ' CSS variables');
+}
+
+/* ---- Wiring ---- */
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active'); state.mode = tab.dataset.mode; renderAll();
+  });
+});
+el('s-hue').addEventListener('input', e => { state.hueStop = +e.target.value; renderAll(); });
+el('s-light').addEventListener('input', e => { state.light = +e.target.value; renderAll(); });
+el('s-chroma').addEventListener('input', e => { state.chromaPct = +e.target.value; renderAll(); });
+el('s-steps').addEventListener('input', e => { state.steps = +e.target.value; renderAll(); });
+el('s-range').addEventListener('input', e => { state.range = +e.target.value; renderAll(); });
+el('copy-all').addEventListener('click', copyAll);
+renderAll();
+</script>
+
+</body>
+</html>
