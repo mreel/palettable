@@ -582,7 +582,8 @@ function renderRails(){
   else if (axis === 'light')
     bg = railGradient((t) => gamutMap(t, key.C, key.H), 24);
   else
-    bg = railGradient((t) => ({ L: key.L, C: t * key.Cmax, H: key.H }), 16);
+    // neutral gray -> the true (active-gamut) chroma boundary, smoothly sampled
+    bg = railGradient((t) => ({ L: key.L, C: t * Cmax(key.H, key.L), H: key.H }), 24);
   el('s-axis').style.background = bg;
 }
 
