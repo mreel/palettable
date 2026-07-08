@@ -310,15 +310,39 @@ function linearToOklab(r, g, b){
     b: 0.0259040371*l_ + 0.7827717662*m_ - 0.8086757660*s_
   };
 }
-function oklabToLinear(L, a, b){
+/* ---- Color-space registry ----
+   Each space provides `M`, the OKLab-LMS -> linear-RGB matrix (rows double as
+   the per-channel weights the gamut solver needs), plus its CSS color()
+   identifier. sRGB uses Ottosson's exact matrix; P3 / Rec.2020 are
+   XYZ->RGB · (OKLab LMS->XYZ). Adding a gamut = one more entry here. */
+const COLOR_SPACES = {
+  srgb: { label: 'sRGB', css: 'srgb', M: [
+    [ 4.0767416621, -3.3077115913,  0.2309699292],
+    [-1.2684380046,  2.6097574011, -0.3413193965],
+    [-0.0041960863, -0.7034186147,  1.7076147010] ] },
+  displayP3: { label: 'Display P3', css: 'display-p3', M: [
+    [ 3.1281105, -2.2570750,  0.1293048],
+    [-1.0911282,  2.4132668, -0.3221682],
+    [-0.0260136, -0.5080276,  1.5333167] ] },
+  rec2020: { label: 'Rec. 2020', css: 'rec2020', M: [
+    [ 2.1401404, -1.2463560,  0.1064317],
+    [-0.8848325,  2.1631727, -0.2783616],
+    [-0.0485791, -0.4544909,  1.5023563] ] }
+};
+let activeSpace = 'srgb';
+function curSpace(){ return COLOR_SPACES[activeSpace]; }
+
+// OKLab -> linear RGB in the given (or active) color space.
+function oklabToLinear(L, a, b, sp){
+  const M = (sp || curSpace()).M;
   const l_ = L + 0.3963377774*a + 0.2158037573*b;
   const m_ = L - 0.1055613458*a - 0.0638541728*b;
   const s_ = L - 0.0894841775*a - 1.2914855480*b;
   const l = l_*l_*l_, m = m_*m_*m_, s = s_*s_*s_;
   return {
-    r:  4.0767416621*l - 3.3077115913*m + 0.2309699292*s,
-    g: -1.2684380046*l + 2.6097574011*m - 0.3413193965*s,
-    b: -0.0041960863*l - 0.7034186147*m + 1.7076147010*s
+    r: M[0][0]*l + M[0][1]*m + M[0][2]*s,
+    g: M[1][0]*l + M[1][1]*m + M[1][2]*s,
+    b: M[2][0]*l + M[2][1]*m + M[2][2]*s
   };
 }
 const DEG = 180/Math.PI, RAD = Math.PI/180;
@@ -346,88 +370,58 @@ function oklchToHex(L, C, H){
   const hx = (v) => v.toString(16).padStart(2,'0');
   return '#' + hx(r) + hx(g) + hx(b);
 }
-/* ---- Analytical sRGB gamut boundary (Björn Ottosson, "gamut clipping") ----
-   Replaces the old binary search: closed-form estimate + Halley refinement. */
+/* ---- Analytical gamut boundary (exact, closed-form, space-agnostic) ----
+   At fixed L,H a channel is a cubic in C:  M_row · (L + C·k)^3.  The gamut
+   edge is the smallest C>0 where any channel reaches 0 or 1 — solved exactly
+   with Cardano, using the active space's matrix. Same math for every gamut. */
 
-// Max saturation S = C/L along the (unit) hue direction (a,b), i.e. where an
-// sRGB channel first leaves [0,1]. Polynomial estimate + one Halley step.
-function computeMaxSaturation(a, b){
-  let k0, k1, k2, k3, k4, wl, wm, ws;
-  if (-1.88170328*a - 0.80936493*b > 1){        // red channel limits first
-    k0=1.19086277; k1=1.76576728; k2=0.59662641; k3=0.75515197; k4=0.56771245;
-    wl=4.0767416621; wm=-3.3077115913; ws=0.2309699292;
-  } else if (1.81444104*a - 1.19445276*b > 1){  // green
-    k0=0.73956515; k1=-0.45954404; k2=0.08285427; k3=0.12541070; k4=0.14503204;
-    wl=-1.2684380046; wm=2.6097574011; ws=-0.3413193965;
-  } else {                                       // blue
-    k0=1.35733652; k1=-0.00915799; k2=-1.15130210; k3=-0.50559606; k4=0.00692167;
-    wl=-0.0041960863; wm=-0.7034186147; ws=1.7076147010;
+// Real roots of a3·x^3 + a2·x^2 + a1·x + a0 (degree-reduces if a3≈0).
+function cubicRealRoots(a3, a2, a1, a0){
+  const r = [];
+  if (Math.abs(a3) < 1e-12){
+    if (Math.abs(a2) < 1e-12){ if (Math.abs(a1) > 1e-12) r.push(-a0/a1); return r; }
+    const disc = a1*a1 - 4*a2*a0;
+    if (disc >= 0){ const sq = Math.sqrt(disc); r.push((-a1+sq)/(2*a2), (-a1-sq)/(2*a2)); }
+    return r;
   }
-  let S = k0 + k1*a + k2*b + k3*a*a + k4*a*b;
-  const k_l =  0.3963377774*a + 0.2158037573*b;
-  const k_m = -0.1055613458*a - 0.0638541728*b;
-  const k_s = -0.0894841775*a - 1.2914855480*b;
-  const l_ = 1 + S*k_l, m_ = 1 + S*k_m, s_ = 1 + S*k_s;
-  const l = l_*l_*l_, m = m_*m_*m_, s = s_*s_*s_;
-  const l_dS = 3*k_l*l_*l_, m_dS = 3*k_m*m_*m_, s_dS = 3*k_s*s_*s_;
-  const l_dS2 = 6*k_l*k_l*l_, m_dS2 = 6*k_m*k_m*m_, s_dS2 = 6*k_s*k_s*s_;
-  const f  = wl*l    + wm*m    + ws*s;
-  const f1 = wl*l_dS + wm*m_dS + ws*s_dS;
-  const f2 = wl*l_dS2+ wm*m_dS2+ ws*s_dS2;
-  return S - f*f1 / (f1*f1 - 0.5*f*f2);
-}
-// Cusp = the most chromatic point (highest C) for a hue direction.
-function findCusp(a, b){
-  const S = computeMaxSaturation(a, b);
-  const rgb = oklabToLinear(1, S*a, S*b);
-  const L_cusp = Math.cbrt(1 / Math.max(rgb.r, rgb.g, rgb.b));
-  return { L: L_cusp, C: L_cusp * S };
-}
-// t along the line (L0,0)->(L1,C1) where it meets the sRGB boundary.
-function findGamutIntersection(a, b, L1, C1, L0, cusp){
-  let t;
-  if (((L1 - L0)*cusp.C - (cusp.L - L0)*C1) <= 0){
-    // lower half — straight edge to black, exact
-    t = cusp.C * L0 / (C1*cusp.L + cusp.C*(L0 - L1));
+  const b = a2/a3, c = a1/a3, d = a0/a3;
+  const p = c - b*b/3, q = 2*b*b*b/27 - b*c/3 + d, shift = -b/3;
+  const disc = q*q/4 + p*p*p/27;
+  if (disc > 1e-14){
+    const sq = Math.sqrt(disc);
+    r.push(Math.cbrt(-q/2 + sq) + Math.cbrt(-q/2 - sq) + shift);
+  } else if (disc < -1e-14){
+    const R = Math.sqrt(-p*p*p/27), phi = Math.acos(Math.max(-1, Math.min(1, -q/2/R))), m = 2*Math.cbrt(R);
+    for (let k = 0; k < 3; k++) r.push(m*Math.cos((phi + 2*Math.PI*k)/3) + shift);
   } else {
-    // upper half — triangle estimate, then 1–2 Halley steps
-    t = cusp.C * (L0 - 1) / (C1*(cusp.L - 1) + cusp.C*(L0 - L1));
-    const k_l =  0.3963377774*a + 0.2158037573*b;
-    const k_m = -0.1055613458*a - 0.0638541728*b;
-    const k_s = -0.0894841775*a - 1.2914855480*b;
-    const dL = L1 - L0, dC = C1;
-    const l_dt = dL + dC*k_l, m_dt = dL + dC*k_m, s_dt = dL + dC*k_s;
-    for (let i = 0; i < 2; i++){
-      const L = L0*(1 - t) + t*L1, C = t*C1;
-      const l_ = L + C*k_l, m_ = L + C*k_m, s_ = L + C*k_s;
-      const l = l_*l_*l_, m = m_*m_*m_, s = s_*s_*s_;
-      const ldt  = 3*l_dt*l_*l_,  mdt  = 3*m_dt*m_*m_,  sdt  = 3*s_dt*s_*s_;
-      const ldt2 = 6*l_dt*l_dt*l_, mdt2 = 6*m_dt*m_dt*m_, sdt2 = 6*s_dt*s_dt*s_;
-      const r  = 4.0767416621*l    - 3.3077115913*m    + 0.2309699292*s    - 1;
-      const r1 = 4.0767416621*ldt  - 3.3077115913*mdt  + 0.2309699292*sdt;
-      const r2 = 4.0767416621*ldt2 - 3.3077115913*mdt2 + 0.2309699292*sdt2;
-      const u_r = r1/(r1*r1 - 0.5*r*r2); let t_r = -r*u_r;
-      const g  = -1.2684380046*l    + 2.6097574011*m    - 0.3413193965*s    - 1;
-      const g1 = -1.2684380046*ldt  + 2.6097574011*mdt  - 0.3413193965*sdt;
-      const g2 = -1.2684380046*ldt2 + 2.6097574011*mdt2 - 0.3413193965*sdt2;
-      const u_g = g1/(g1*g1 - 0.5*g*g2); let t_g = -g*u_g;
-      const bch  = -0.0041960863*l    - 0.7034186147*m    + 1.7076147010*s    - 1;
-      const b1 = -0.0041960863*ldt  - 0.7034186147*mdt  + 1.7076147010*sdt;
-      const b2 = -0.0041960863*ldt2 - 0.7034186147*mdt2 + 1.7076147010*sdt2;
-      const u_b = b1/(b1*b1 - 0.5*bch*b2); let t_b = -bch*u_b;
-      t_r = u_r >= 0 ? t_r : Infinity;
-      t_g = u_g >= 0 ? t_g : Infinity;
-      t_b = u_b >= 0 ? t_b : Infinity;
-      t += Math.min(t_r, t_g, t_b);
-    }
+    const u = Math.cbrt(-q/2); r.push(2*u + shift, -u + shift);
   }
-  return t;
+  return r;
 }
-// Max in-gamut chroma at fixed hue H and lightness L.
-function Cmax(H, L){
+function smallestPositive(roots, cap){
+  let best = cap;
+  for (const x of roots) if (x > 1e-9 && x < best) best = x;
+  return best;
+}
+// Max in-gamut chroma at fixed hue H and lightness L, in the active (or given) space.
+function Cmax(H, L, sp){
   if (L <= 0 || L >= 1) return 0;
+  const M = (sp || curSpace()).M;
   const a = Math.cos(H*RAD), b = Math.sin(H*RAD);
-  return findGamutIntersection(a, b, L, 1, L, findCusp(a, b));
+  const kl =  0.3963377774*a + 0.2158037573*b;
+  const km = -0.1055613458*a - 0.0638541728*b;
+  const ks = -0.0894841775*a - 1.2914855480*b;
+  let best = Infinity;
+  for (let i = 0; i < 3; i++){
+    const wl = M[i][0], wm = M[i][1], ws = M[i][2];
+    const a3 = wl*kl*kl*kl + wm*km*km*km + ws*ks*ks*ks;
+    const a2 = 3*L*(wl*kl*kl + wm*km*km + ws*ks*ks);
+    const a1 = 3*L*L*(wl*kl + wm*km + ws*ks);
+    const a0 = L*L*L*(wl + wm + ws);              // channel value at C=0 (= L^3)
+    best = smallestPositive(cubicRealRoots(a3, a2, a1, a0),     best); // channel hits 0
+    best = smallestPositive(cubicRealRoots(a3, a2, a1, a0 - 1), best); // channel hits 1
+  }
+  return isFinite(best) ? best : 0;
 }
 // Clamp toward the neutral axis at fixed L,H until in gamut.
 function gamutMap(L, C, H){
