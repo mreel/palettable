@@ -174,6 +174,13 @@
   }
   .btn:active { border-color: var(--accent); }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .select {
+    width: 100%; appearance: none; -webkit-appearance: none;
+    background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--line); border-radius: 8px;
+    padding: 9px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .stack { display: flex; flex-direction: column; }
   .swatch {
@@ -261,6 +268,18 @@
         <span class="ctrl-val" id="v-axis">R</span>
       </div>
       <input type="range" id="s-axis" min="0" max="119" step="1" value="0">
+    </div>
+
+    <div class="ctrl">
+      <div class="ctrl-head">
+        <label for="space-select">Gamut</label>
+        <span class="ctrl-val" id="v-space">sRGB</span>
+      </div>
+      <select id="space-select" class="select">
+        <option value="srgb">sRGB</option>
+        <option value="displayP3">Display P3</option>
+        <option value="rec2020">Rec. 2020</option>
+      </select>
     </div>
 
     <div class="ctrl">
@@ -353,7 +372,7 @@ function oklabToOklch(L, a, b){
   return { L, C, H };
 }
 function oklchToOklab(L, C, H){ return { L, a: C*Math.cos(H*RAD), b: C*Math.sin(H*RAD) }; }
-function oklchToLinear(L, C, H){ const lab = oklchToOklab(L, C, H); return oklabToLinear(lab.L, lab.a, lab.b); }
+function oklchToLinear(L, C, H, sp){ const lab = oklchToOklab(L, C, H); return oklabToLinear(lab.L, lab.a, lab.b, sp); }
 function hexToOklch(hex){
   hex = hex.replace('#','');
   const r = parseInt(hex.slice(0,2),16)/255, g = parseInt(hex.slice(2,4),16)/255, b = parseInt(hex.slice(4,6),16)/255;
@@ -369,6 +388,13 @@ function oklchToHex(L, C, H){
   const { r, g, b } = oklchToRgb255(L, C, H);
   const hx = (v) => v.toString(16).padStart(2,'0');
   return '#' + hx(r) + hx(g) + hx(b);
+}
+// Primary CSS color string for the active space: hex for sRGB, else color(...).
+function cssColor(c){
+  if (activeSpace === 'srgb') return oklchToHex(c.L, c.C, c.H);
+  const lin = oklchToLinear(c.L, c.C, c.H); // active-space linear RGB
+  const e = (v) => +Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, v))))).toFixed(4);
+  return `color(${curSpace().css} ${e(lin.r)} ${e(lin.g)} ${e(lin.b)})`;
 }
 /* ---- Analytical gamut boundary (exact, closed-form, space-agnostic) ----
    At fixed L,H a channel is a cubic in C:  M_row · (L + C·k)^3.  The gamut
@@ -560,12 +586,29 @@ function renderRails(){
 }
 
 // square background: fixed slider axis + X(u) + Y(v). Only changes when the
-// slider axis or mode changes, so it is cheap to leave out of renderAll().
+// slider axis, mode, or active gamut changes; kept out of renderAll().
+// Rendered into a display-p3 canvas when supported (so wide-gamut colors show
+// truly); pixels are computed in the canvas's own space, chroma extent from
+// the active space's Cmax.
 const SQ = 160;
+let _sqCtx = null, _sqSpace = null, _sqP3 = false;
+function sqContext(){
+  if (_sqCtx) return _sqCtx;
+  let p3 = false;
+  try {
+    const t = document.createElement('canvas').getContext('2d', { colorSpace: 'display-p3' });
+    p3 = !!(t && t.getContextAttributes && t.getContextAttributes().colorSpace === 'display-p3');
+  } catch (e) {}
+  _sqP3 = p3;
+  _sqSpace = p3 ? COLOR_SPACES.displayP3 : COLOR_SPACES.srgb;
+  _sqCtx = el('sq-canvas').getContext('2d', p3 ? { colorSpace: 'display-p3' } : undefined);
+  return _sqCtx;
+}
 function renderSquareBg(){
   const cfg = MODE_CFG[state.mode];
-  const canvas = el('sq-canvas'); const ctx = canvas.getContext('2d');
-  const img = ctx.createImageData(SQ, SQ), d = img.data;
+  const ctx = sqContext();
+  const img = ctx.createImageData(SQ, SQ, _sqP3 ? { colorSpace: 'display-p3' } : undefined);
+  const d = img.data;
   const frac = {};
   frac[cfg.slider] = axisFrac(cfg.slider);
   let p = 0;
@@ -577,8 +620,8 @@ function renderSquareBg(){
     for (let px = 0; px < SQ; px++){
       frac[cfg.x] = px/(SQ-1);
       const H = stopToHue(frac.hue * STOPS), L = frac.light;
-      const cm = rowCmax !== null ? rowCmax : Cmax(H, L);
-      const lin = oklchToLinear(L, frac.chroma * cm, H);
+      const cm = rowCmax !== null ? rowCmax : Cmax(H, L);          // active-space extent
+      const lin = oklchToLinear(L, frac.chroma * cm, H, _sqSpace); // canvas-space color
       d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.r))))) * 255);
       d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.g))))) * 255);
       d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.b))))) * 255);
@@ -614,12 +657,18 @@ function configureSlider(){
 }
 function renderKey(){
   const key = keyColor();
-  const rgb = oklchToRgb255(key.L, key.C, key.H);
   el('keyswatch').style.background = oklchCss(key);
+  let line3;
+  if (activeSpace === 'srgb'){
+    const rgb = oklchToRgb255(key.L, key.C, key.H);
+    line3 = `${oklchToHex(key.L, key.C, key.H)} · rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+  } else {
+    line3 = cssColor(key);
+  }
   el('keymeta').innerHTML =
     `<b>${stopToName(state.hueStop)}</b> · ${oklchString(key)}<br>` +
     `hue ${key.H.toFixed(2)}° · Cmax ${key.Cmax.toFixed(4)}<br>` +
-    `${oklchToHex(key.L, key.C, key.H)} · rgb(${rgb.r}, ${rgb.g}, ${rgb.b})`;
+    line3;
 }
 function contrastText(c){ return c.L > 0.6 ? '#111319' : '#f4f5fb'; }
 function renderPalette(){
@@ -681,7 +730,7 @@ function fallbackCopy(text, done){
 }
 function copyAll(){
   const colors = generate();
-  const lines = colors.map((c, i) => `  --color-${i+1}: ${oklchToHex(c.L, c.C, c.H)};`);
+  const lines = colors.map((c, i) => `  --color-${i+1}: ${cssColor(c)};`);
   copy(':root {\n' + lines.join('\n') + '\n}', 'Copied ' + colors.length + ' CSS variables');
 }
 
@@ -731,6 +780,12 @@ square.addEventListener('keydown', e => {
   renderAll();
 });
 
+el('space-select').addEventListener('change', e => {
+  activeSpace = e.target.value;
+  el('v-space').textContent = COLOR_SPACES[activeSpace].label;
+  renderAll();
+  renderSquareBg(); // gamut envelope changed -> square re-tints
+});
 el('s-steps').addEventListener('input', e => { state.steps = +e.target.value; renderAll(); });
 el('s-range').addEventListener('input', e => { state.range = +e.target.value; renderAll(); });
 el('copy-all').addEventListener('click', copyAll);
