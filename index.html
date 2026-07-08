@@ -132,6 +132,38 @@
   }
   input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent); }
 
+  /* 2D square picker */
+  .square {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    margin-bottom: 18px;
+    touch-action: none;
+    cursor: crosshair;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .square canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; image-rendering: auto;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,.12);
+    box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  }
+  .sq-lbl {
+    position: absolute; z-index: 2; pointer-events: none;
+    font: 700 10px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase;
+    color: rgba(255,255,255,.9); text-shadow: 0 1px 3px rgba(0,0,0,.7);
+  }
+  .sq-lbl-x { right: 9px; bottom: 8px; }
+  .sq-lbl-y { left: 9px; top: 9px; }
+  .sq-marker {
+    position: absolute; z-index: 3; width: 22px; height: 22px; border-radius: 50%;
+    border: 3px solid #fff; transform: translate(-50%, -50%); pointer-events: none;
+    box-shadow: 0 0 0 1.5px rgba(0,0,0,.5), 0 2px 7px rgba(0,0,0,.5);
+  }
+  .square:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   /* Palette */
   .pal-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
   .btn {
@@ -175,6 +207,16 @@
   }
   .delta .bar { flex: 1; height: 1px; background: var(--line); max-width: 90px; }
 
+  /* Single-swatch: big square */
+  .stack.single { align-items: center; }
+  .stack.single .swatch {
+    aspect-ratio: 1 / 1; min-height: 0; width: 100%; max-width: 460px;
+    flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+    border-radius: 14px;
+  }
+  .stack.single .sw-hex { font-size: 24px; }
+  .stack.single .sw-oklch { font-size: 13px; text-align: center; }
+
   .toast {
     position: fixed; bottom: 22px; left: 50%; transform: translateX(-50%) translateY(20px);
     background: var(--accent); color: #0b1020; font-weight: 600; font-size: 13px;
@@ -206,28 +248,19 @@
       <div class="keymeta" id="keymeta"></div>
     </div>
 
-    <div class="ctrl">
-      <div class="ctrl-head">
-        <label for="s-hue">Hue</label>
-        <span class="ctrl-val" id="v-hue">R</span>
-      </div>
-      <input type="range" id="s-hue" min="0" max="119" step="1" value="0">
+    <div class="square" id="square" tabindex="0" role="slider" aria-label="Color square">
+      <canvas id="sq-canvas" width="160" height="160"></canvas>
+      <span class="sq-lbl sq-lbl-y" id="sq-lbl-y">L</span>
+      <span class="sq-lbl sq-lbl-x" id="sq-lbl-x">C</span>
+      <div class="sq-marker" id="sq-marker"></div>
     </div>
 
     <div class="ctrl">
       <div class="ctrl-head">
-        <label for="s-light">Lightness</label>
-        <span class="ctrl-val" id="v-light">63</span>
+        <label for="s-axis" id="axis-label">Hue</label>
+        <span class="ctrl-val" id="v-axis">R</span>
       </div>
-      <input type="range" id="s-light" min="0" max="100" step="1" value="63">
-    </div>
-
-    <div class="ctrl">
-      <div class="ctrl-head">
-        <label for="s-chroma">Chroma</label>
-        <span class="ctrl-val" id="v-chroma">100%</span>
-      </div>
-      <input type="range" id="s-chroma" min="0" max="100" step="1" value="100">
+      <input type="range" id="s-axis" min="0" max="119" step="1" value="0">
     </div>
 
     <div class="ctrl">
@@ -318,10 +351,11 @@ function inGamut(L, C, H){
   const { r, g, b } = oklchToLinear(L, C, H);
   return r >= -EPS && r <= 1+EPS && g >= -EPS && g <= 1+EPS && b >= -EPS && b <= 1+EPS;
 }
-function Cmax(H, L){
+function Cmax(H, L, iter){
   if (!inGamut(L, 0, H)) return 0;
   let lo = 0, hi = 0.5;
-  for (let i = 0; i < 30; i++){ const mid = (lo+hi)/2; if (inGamut(L, mid, H)) lo = mid; else hi = mid; }
+  const n = iter || 30;
+  for (let i = 0; i < n; i++){ const mid = (lo+hi)/2; if (inGamut(L, mid, H)) lo = mid; else hi = mid; }
   return lo;
 }
 function gamutMap(L, C, H){
@@ -400,6 +434,44 @@ function generate(){
 function oklchString(c){ return `oklch(${c.L.toFixed(4)} ${c.C.toFixed(4)} ${c.H.toFixed(2)})`; }
 function oklchCss(c){ return `oklch(${(c.L*100).toFixed(2)}% ${c.C.toFixed(4)} ${c.H.toFixed(2)})`; }
 
+/* ---- Axis / square model ----
+   In each mode the swept axis is the slider; the two held axes fill the square.
+   Square X is horizontal (left = min), Y is vertical (bottom = min, top = max). */
+const MODE_CFG = {
+  lightness: { slider:'light',  x:'chroma', y:'hue'   },
+  hue:       { slider:'hue',    x:'chroma', y:'light' },
+  chroma:    { slider:'chroma', x:'hue',    y:'light' }
+};
+const AXIS_LABEL = { hue:'Hue', light:'Lightness', chroma:'Chroma' };
+
+// axis value as a 0..1 fraction of its own range
+function axisFrac(axis){
+  if (axis === 'hue')   return state.hueStop / STOPS;
+  if (axis === 'light') return state.light / 100;
+  return state.chromaPct / 100;
+}
+function setAxisFrac(axis, f){
+  f = Math.min(1, Math.max(0, f));
+  if (axis === 'hue')   state.hueStop = Math.round(f * STOPS) % STOPS;
+  else if (axis === 'light') state.light = Math.round(f * 100);
+  else state.chromaPct = Math.round(f * 100);
+}
+function axisIntValue(axis){
+  if (axis === 'hue') return state.hueStop;
+  if (axis === 'light') return state.light;
+  return state.chromaPct;
+}
+function setAxisIntValue(axis, v){
+  if (axis === 'hue') state.hueStop = v;
+  else if (axis === 'light') state.light = v;
+  else state.chromaPct = v;
+}
+function axisDisplay(axis){
+  if (axis === 'hue') return stopToName(state.hueStop);
+  if (axis === 'light') return String(state.light);
+  return state.chromaPct + '%';
+}
+
 /* ---- Rendering ---- */
 const el = (id) => document.getElementById(id);
 function railGradient(sampler, segments){
@@ -410,14 +482,71 @@ function railGradient(sampler, segments){
   }
   return `linear-gradient(90deg, ${stops.join(', ')})`;
 }
+// paint the single adaptive slider's rail for the axis this mode sweeps
 function renderRails(){
-  const key = keyColor();
-  el('s-hue').style.background = railGradient(
-    (t) => gamutMap(key.L, Math.max(key.C, 0.08), t * 360), 24);
-  el('s-light').style.background = railGradient(
-    (t) => gamutMap(t, key.C, key.H), 24);
-  el('s-chroma').style.background = railGradient(
-    (t) => ({ L: key.L, C: t * key.Cmax, H: key.H }), 16);
+  const key = keyColor(), axis = MODE_CFG[state.mode].slider;
+  let bg;
+  if (axis === 'hue')
+    bg = railGradient((t) => gamutMap(key.L, Math.max(key.C, 0.08), t * 360), 24);
+  else if (axis === 'light')
+    bg = railGradient((t) => gamutMap(t, key.C, key.H), 24);
+  else
+    bg = railGradient((t) => ({ L: key.L, C: t * key.Cmax, H: key.H }), 16);
+  el('s-axis').style.background = bg;
+}
+
+// square background: fixed slider axis + X(u) + Y(v). Only changes when the
+// slider axis or mode changes, so it is cheap to leave out of renderAll().
+const SQ = 160, SQ_ITER = 16;
+function renderSquareBg(){
+  const cfg = MODE_CFG[state.mode];
+  const canvas = el('sq-canvas'); const ctx = canvas.getContext('2d');
+  const img = ctx.createImageData(SQ, SQ), d = img.data;
+  const frac = {};
+  frac[cfg.slider] = axisFrac(cfg.slider);
+  let p = 0;
+  for (let py = 0; py < SQ; py++){
+    frac[cfg.y] = 1 - py/(SQ-1);
+    // when chroma is on X, H & L are constant across the row -> hoist Cmax
+    let rowCmax = null;
+    if (cfg.x === 'chroma') rowCmax = Cmax(stopToHue(frac.hue * STOPS), frac.light, SQ_ITER);
+    for (let px = 0; px < SQ; px++){
+      frac[cfg.x] = px/(SQ-1);
+      const H = stopToHue(frac.hue * STOPS), L = frac.light;
+      const cm = rowCmax !== null ? rowCmax : Cmax(H, L, SQ_ITER);
+      const lin = oklchToLinear(L, frac.chroma * cm, H);
+      d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.r))))) * 255);
+      d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.g))))) * 255);
+      d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.b))))) * 255);
+      d[p++] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+let sqBgPending = false;
+function scheduleSquareBg(){
+  if (sqBgPending) return;
+  sqBgPending = true;
+  requestAnimationFrame(() => { sqBgPending = false; renderSquareBg(); });
+}
+function positionMarker(){
+  const cfg = MODE_CFG[state.mode];
+  const m = el('sq-marker');
+  m.style.left = (axisFrac(cfg.x) * 100) + '%';
+  m.style.top  = ((1 - axisFrac(cfg.y)) * 100) + '%';
+  m.style.background = oklchCss(keyColor());
+}
+function renderSquareLabels(){
+  const cfg = MODE_CFG[state.mode];
+  el('sq-lbl-x').textContent = AXIS_LABEL[cfg.x];
+  el('sq-lbl-y').textContent = AXIS_LABEL[cfg.y];
+}
+function configureSlider(){
+  const axis = MODE_CFG[state.mode].slider, s = el('s-axis');
+  s.min = 0;
+  s.max = axis === 'hue' ? STOPS - 1 : 100;
+  s.step = 1;
+  s.value = axisIntValue(axis);
 }
 function renderKey(){
   const key = keyColor();
@@ -431,6 +560,7 @@ function renderKey(){
 function contrastText(c){ return c.L > 0.6 ? '#111319' : '#f4f5fb'; }
 function renderPalette(){
   const colors = generate(); const stack = el('stack'); stack.innerHTML = '';
+  stack.classList.toggle('single', colors.length === 1);
   const showDelta = true;
   colors.forEach((c, i) => {
     const hex = oklchToHex(c.L, c.C, c.H);
@@ -455,15 +585,16 @@ function renderPalette(){
   });
 }
 function renderControls(){
-  el('v-hue').textContent = stopToName(state.hueStop);
-  el('v-light').textContent = state.light;
-  el('v-chroma').textContent = state.chromaPct + '%';
+  const axis = MODE_CFG[state.mode].slider;
+  el('axis-label').textContent = AXIS_LABEL[axis];
+  el('v-axis').textContent = axisDisplay(axis);
+  el('s-axis').value = axisIntValue(axis);
   el('v-steps').textContent = state.steps;
   el('v-range').textContent = state.range;
   el('ctrl-range').classList.toggle('hidden', state.steps === 1);
   el('pal-title').textContent = state.mode.charAt(0).toUpperCase() + state.mode.slice(1) + ' palette';
 }
-function renderAll(){ renderControls(); renderRails(); renderKey(); renderPalette(); }
+function renderAll(){ renderControls(); renderRails(); renderSquareLabels(); positionMarker(); renderKey(); renderPalette(); }
 
 /* ---- Copy ---- */
 let toastTimer = null;
@@ -494,16 +625,55 @@ function copyAll(){
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active'); state.mode = tab.dataset.mode; renderAll();
+    tab.classList.add('active');
+    state.mode = tab.dataset.mode;
+    configureSlider();
+    renderAll();
+    renderSquareBg(); // slider axis changed -> square shows a new pair of axes
   });
 });
-el('s-hue').addEventListener('input', e => { state.hueStop = +e.target.value; renderAll(); });
-el('s-light').addEventListener('input', e => { state.light = +e.target.value; renderAll(); });
-el('s-chroma').addEventListener('input', e => { state.chromaPct = +e.target.value; renderAll(); });
+
+// the single slider drives whichever axis this mode sweeps
+el('s-axis').addEventListener('input', e => {
+  setAxisIntValue(MODE_CFG[state.mode].slider, +e.target.value);
+  renderAll();
+  scheduleSquareBg(); // fixed axis moved -> square background re-tints
+});
+
+// the square drives the two held axes; its background does not change on drag
+const square = el('square');
+let sqDragging = false;
+function sqFromEvent(e){
+  const r = square.getBoundingClientRect();
+  const cfg = MODE_CFG[state.mode];
+  setAxisFrac(cfg.x, (e.clientX - r.left) / r.width);
+  setAxisFrac(cfg.y, 1 - (e.clientY - r.top) / r.height);
+  renderAll();
+}
+square.addEventListener('pointerdown', e => { sqDragging = true; square.setPointerCapture(e.pointerId); sqFromEvent(e); });
+square.addEventListener('pointermove', e => { if (sqDragging) sqFromEvent(e); });
+square.addEventListener('pointerup',   () => { sqDragging = false; });
+square.addEventListener('pointercancel', () => { sqDragging = false; });
+square.addEventListener('keydown', e => {
+  const cfg = MODE_CFG[state.mode];
+  const nudge = (axis, d) => setAxisFrac(axis, axisFrac(axis) + d);
+  const k = e.key;
+  if (k === 'ArrowLeft')  nudge(cfg.x, -0.01);
+  else if (k === 'ArrowRight') nudge(cfg.x, 0.01);
+  else if (k === 'ArrowUp')    nudge(cfg.y, 0.01);
+  else if (k === 'ArrowDown')  nudge(cfg.y, -0.01);
+  else return;
+  e.preventDefault();
+  renderAll();
+});
+
 el('s-steps').addEventListener('input', e => { state.steps = +e.target.value; renderAll(); });
 el('s-range').addEventListener('input', e => { state.range = +e.target.value; renderAll(); });
 el('copy-all').addEventListener('click', copyAll);
+
+configureSlider();
 renderAll();
+renderSquareBg();
 </script>
 
 </body>
