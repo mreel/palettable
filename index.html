@@ -577,7 +577,8 @@ function renderRails(){
   const key = keyColor(), axis = MODE_CFG[state.mode].slider;
   let bg;
   if (axis === 'hue')
-    bg = railGradient((t) => gamutMap(key.L, Math.max(key.C, 0.08), t * 360), 24);
+    // true maximum gamut envelope: each hue at its own max chroma for key.L
+    bg = railGradient((t) => { const H = t * 360; return { L: key.L, C: Cmax(H, key.L), H }; }, 24);
   else if (axis === 'light')
     bg = railGradient((t) => gamutMap(t, key.C, key.H), 24);
   else
