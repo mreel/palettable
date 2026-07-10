@@ -509,7 +509,8 @@ function renderRails(){
   el('s-light').style.background = railGradient(
     (t) => gamutMap(t, key.C, key.H), 24);
   el('s-chroma').style.background = railGradient(
-    (t) => ({ L: key.L, C: t * key.Cmax, H: key.H }), 16);
+    // neutral gray -> the true (active-gamut) chroma boundary, smoothly sampled
+    (t) => ({ L: key.L, C: t * Cmax(key.H, key.L), H: key.H }), 24);
 }
 function renderKey(){
   const key = keyColor();
