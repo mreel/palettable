@@ -504,7 +504,8 @@ function railGradient(sampler, segments){
 function renderRails(){
   const key = keyColor();
   el('s-hue').style.background = railGradient(
-    (t) => gamutMap(key.L, Math.max(key.C, 0.08), t * 360), 24);
+    // true maximum gamut envelope: each hue at its own max chroma for key.L
+    (t) => { const H = t * 360; return { L: key.L, C: Cmax(H, key.L), H }; }, 24);
   el('s-light').style.background = railGradient(
     (t) => gamutMap(t, key.C, key.H), 24);
   el('s-chroma').style.background = railGradient(
