@@ -159,6 +159,23 @@
   .fmt-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
   .fmt-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+  /* ΔE legend */
+  .legend-toggle {
+    background: none; border: none; color: var(--muted); cursor: pointer;
+    font: inherit; font-size: 12px; font-weight: 600; padding: 14px 2px 0; text-align: left;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .legend-toggle:hover { color: var(--text); }
+  .legend { margin-top: 11px; border-top: 1px solid var(--line); padding-top: 12px; display: grid; gap: 8px; }
+  .legend.hidden { display: none; }
+  .legend-row { display: flex; align-items: baseline; gap: 12px; font-size: 12px; }
+  .legend-band {
+    font-family: var(--mono); font-weight: 700; color: var(--accent);
+    min-width: 52px; font-variant-numeric: tabular-nums;
+  }
+  .legend-desc { color: var(--muted); }
+  .legend-note { font-size: 11px; color: var(--muted); margin-top: 3px; }
+
   .stack { display: flex; flex-direction: column; }
   .swatch {
     position: relative;
@@ -283,6 +300,14 @@
     </div>
     <div class="fmt" id="fmt"></div>
     <div class="stack" id="stack"></div>
+    <button class="legend-toggle" id="legend-toggle" aria-expanded="false">ΔE scale ▾</button>
+    <div class="legend hidden" id="legend">
+      <div class="legend-row"><span class="legend-band">&lt; 1</span><span class="legend-desc">Imperceptible</span></div>
+      <div class="legend-row"><span class="legend-band">1–2</span><span class="legend-desc">Visible to trained observers</span></div>
+      <div class="legend-row"><span class="legend-band">2–10</span><span class="legend-desc">Typical UI color differences</span></div>
+      <div class="legend-row"><span class="legend-band">&gt; 10</span><span class="legend-desc">Clearly different colors</span></div>
+      <div class="legend-note">ΔE = OKLab distance × 100, shown between adjacent swatches.</div>
+    </div>
   </section>
 </div>
 
@@ -656,6 +681,11 @@ el('space-select').addEventListener('change', e => {
 el('s-steps').addEventListener('input', e => { state.steps = +e.target.value; renderAll(); });
 el('s-range').addEventListener('input', e => { state.range = +e.target.value; renderAll(); });
 el('copy-all').addEventListener('click', copyAll);
+el('legend-toggle').addEventListener('click', () => {
+  const hidden = el('legend').classList.toggle('hidden');
+  el('legend-toggle').textContent = 'ΔE scale ' + (hidden ? '▾' : '▴');
+  el('legend-toggle').setAttribute('aria-expanded', String(!hidden));
+});
 renderFormatButtons();
 renderAll();
 </script>
