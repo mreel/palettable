@@ -149,6 +149,15 @@
     padding: 9px 12px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
   }
   .select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .fmt { display: flex; gap: 5px; flex-wrap: wrap; margin: 0 0 14px; }
+  .fmt-btn {
+    background: var(--panel-2); color: var(--muted);
+    border: 1px solid var(--line); border-radius: 7px;
+    padding: 6px 11px; font-family: var(--mono); font-size: 11px; font-weight: 700;
+    letter-spacing: .3px; cursor: pointer; -webkit-tap-highlight-color: transparent;
+  }
+  .fmt-btn.active { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .fmt-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
   .stack { display: flex; flex-direction: column; }
   .swatch {
@@ -272,6 +281,7 @@
       <strong id="pal-title">Palette</strong>
       <button class="btn" id="copy-all">Copy all as CSS</button>
     </div>
+    <div class="fmt" id="fmt"></div>
     <div class="stack" id="stack"></div>
   </section>
 </div>
@@ -316,6 +326,7 @@ const COLOR_SPACES = {
     [-0.0485791, -0.4544909,  1.5023563] ] }
 };
 let activeSpace = 'srgb';
+let copyFormat = 'hex';   // primary swatch format: hex | rgb | hsl | space
 function curSpace(){ return COLOR_SPACES[activeSpace]; }
 
 // OKLab -> linear RGB in the given (or active) color space.
@@ -362,6 +373,20 @@ function cssColor(c){
   const lin = oklchToLinear(c.L, c.C, c.H); // active-space linear RGB
   const e = (v) => +Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, v))))).toFixed(4);
   return `color(${curSpace().css} ${e(lin.r)} ${e(lin.g)} ${e(lin.b)})`;
+}
+function rgbToHsl(r, g, b){ // r,g,b in 0..1
+  const mx = Math.max(r,g,b), mn = Math.min(r,g,b), d = mx - mn;
+  let h = 0;
+  if (d){ if (mx===r) h = ((g-b)/d)%6; else if (mx===g) h = (b-r)/d + 2; else h = (r-g)/d + 4; h *= 60; if (h<0) h += 360; }
+  const l = (mx+mn)/2, s = d ? d/(1 - Math.abs(2*l-1)) : 0;
+  return { h, s, l };
+}
+// The swatch's primary string in the currently selected format.
+function formatColor(c){
+  if (copyFormat === 'rgb'){ const {r,g,b} = oklchToRgb255(c.L,c.C,c.H); return `rgb(${r}, ${g}, ${b})`; }
+  if (copyFormat === 'hsl'){ const {r,g,b} = oklchToRgb255(c.L,c.C,c.H); const h = rgbToHsl(r/255,g/255,b/255); return `hsl(${Math.round(h.h)}, ${Math.round(h.s*100)}%, ${Math.round(h.l*100)}%)`; }
+  if (copyFormat === 'space') return cssColor(c);
+  return oklchToHex(c.L, c.C, c.H);
 }
 /* ---- Analytical gamut boundary (exact, closed-form, space-agnostic) ----
    At fixed L,H a channel is a cubic in C:  M_row · (L + C·k)^3.  The gamut
@@ -528,21 +553,35 @@ function renderKey(){
     line3;
 }
 function contrastText(c){ return c.L > 0.6 ? '#111319' : '#f4f5fb'; }
+const FMT_LABEL = { hex:'Hex', rgb:'RGB', hsl:'HSL' };
+function renderFormatButtons(){
+  const fmts = ['hex','rgb','hsl'];
+  if (activeSpace !== 'srgb') fmts.push('space'); // color(display-p3 …) / color(rec2020 …)
+  if (!fmts.includes(copyFormat)) copyFormat = 'hex';
+  const box = el('fmt'); box.innerHTML = '';
+  fmts.forEach(f => {
+    const btn = document.createElement('button');
+    btn.className = 'fmt-btn' + (f === copyFormat ? ' active' : '');
+    btn.textContent = f === 'space' ? (activeSpace === 'displayP3' ? 'P3' : 'Rec2020') : FMT_LABEL[f];
+    btn.onclick = () => { copyFormat = f; renderFormatButtons(); renderPalette(); };
+    box.appendChild(btn);
+  });
+}
 function renderPalette(){
   const colors = generate(); const stack = el('stack'); stack.innerHTML = '';
   const showDelta = true;
   colors.forEach((c, i) => {
-    const hex = oklchToHex(c.L, c.C, c.H);
+    const primary = formatColor(c);
     const sw = document.createElement('div');
     sw.className = 'swatch'; sw.style.background = oklchCss(c); sw.style.color = contrastText(c);
     const hexEl = document.createElement('span');
-    hexEl.className = 'sw-hex'; hexEl.textContent = hex; hexEl.title = 'Copy hex';
-    hexEl.onclick = (e) => { e.stopPropagation(); copy(hex, 'Copied ' + hex); };
+    hexEl.className = 'sw-hex'; hexEl.textContent = primary; hexEl.title = 'Copy';
+    hexEl.onclick = (e) => { e.stopPropagation(); copy(primary, 'Copied ' + primary); };
     const okEl = document.createElement('span');
     okEl.className = 'sw-oklch'; okEl.textContent = oklchCss(c); okEl.title = 'Copy oklch()';
     okEl.onclick = (e) => { e.stopPropagation(); copy(oklchCss(c), 'Copied oklch()'); };
     sw.appendChild(hexEl); sw.appendChild(okEl);
-    sw.onclick = () => copy(hex, 'Copied ' + hex);
+    sw.onclick = () => copy(primary, 'Copied ' + primary);
     stack.appendChild(sw);
     if (showDelta && i < colors.length - 1){
       const d = deltaEok(colors[i], colors[i+1]);
@@ -585,7 +624,7 @@ function fallbackCopy(text, done){
 }
 function copyAll(){
   const colors = generate();
-  const lines = colors.map((c, i) => `  --color-${i+1}: ${cssColor(c)};`);
+  const lines = colors.map((c, i) => `  --color-${i+1}: ${formatColor(c)};`);
   copy(':root {\n' + lines.join('\n') + '\n}', 'Copied ' + colors.length + ' CSS variables');
 }
 
@@ -602,11 +641,13 @@ el('s-chroma').addEventListener('input', e => { state.chromaPct = +e.target.valu
 el('space-select').addEventListener('change', e => {
   activeSpace = e.target.value;
   el('v-space').textContent = COLOR_SPACES[activeSpace].label;
+  renderFormatButtons(); // add/remove the color() option for wide gamuts
   renderAll();
 });
 el('s-steps').addEventListener('input', e => { state.steps = +e.target.value; renderAll(); });
 el('s-range').addEventListener('input', e => { state.range = +e.target.value; renderAll(); });
 el('copy-all').addEventListener('click', copyAll);
+renderFormatButtons();
 renderAll();
 </script>
 
