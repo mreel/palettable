@@ -552,7 +552,16 @@ function renderKey(){
     `hue ${key.H.toFixed(2)}° · Cmax ${key.Cmax.toFixed(4)}<br>` +
     line3;
 }
-function contrastText(c){ return c.L > 0.6 ? '#111319' : '#f4f5fb'; }
+// Black or white overlay text by WCAG contrast ratio on the swatch's relative
+// luminance (linear sRGB), not OKLCH L — fixes readability on yellows/cyans.
+function contrastText(c){
+  const lin = oklchToLinear(c.L, c.C, c.H, COLOR_SPACES.srgb);
+  const cl = (v) => Math.min(1, Math.max(0, v));
+  const Y = 0.2126*cl(lin.r) + 0.7152*cl(lin.g) + 0.0722*cl(lin.b);
+  const contrastVsBlack = (Y + 0.05) / 0.05;
+  const contrastVsWhite = 1.05 / (Y + 0.05);
+  return contrastVsBlack >= contrastVsWhite ? '#111319' : '#f4f5fb';
+}
 const FMT_LABEL = { hex:'Hex', rgb:'RGB', hsl:'HSL' };
 function renderFormatButtons(){
   const fmts = ['hex','rgb','hsl'];
