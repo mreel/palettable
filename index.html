@@ -132,6 +132,40 @@
   }
   input[type=range]:focus-visible::-webkit-slider-thumb { box-shadow: 0 0 0 3px var(--accent); }
 
+  .picker-hidden { display: none; }
+
+  /* 2D square picker (dormant — see setPickerMode) */
+  .square {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    border-radius: 12px;
+    margin-bottom: 18px;
+    touch-action: none;
+    cursor: crosshair;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .square canvas {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    display: block; image-rendering: auto;
+    border-radius: 12px;
+    border: 1px solid rgba(0,0,0,.12);
+    box-shadow: 0 6px 18px rgba(0,0,0,.18);
+  }
+  .sq-lbl {
+    position: absolute; z-index: 2; pointer-events: none;
+    font: 700 10px/1 var(--mono); letter-spacing: .4px; text-transform: uppercase;
+    color: rgba(255,255,255,.9); text-shadow: 0 1px 3px rgba(0,0,0,.7);
+  }
+  .sq-lbl-x { right: 9px; bottom: 8px; }
+  .sq-lbl-y { left: 9px; top: 9px; }
+  .sq-marker {
+    position: absolute; z-index: 3; width: 22px; height: 22px; border-radius: 50%;
+    border: 3px solid #fff; transform: translate(-50%, -50%); pointer-events: none;
+    box-shadow: 0 0 0 1.5px rgba(0,0,0,.5), 0 2px 7px rgba(0,0,0,.5);
+  }
+  .square:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
   /* Palette */
   .pal-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
   .btn {
@@ -142,6 +176,7 @@
   }
   .btn:active { border-color: var(--accent); }
   .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .view-toggle { width: 100%; margin-bottom: 16px; }
   .select {
     width: 100%; appearance: none; -webkit-appearance: none;
     background: var(--panel-2); color: var(--text);
@@ -184,6 +219,7 @@
     min-height: 68px;
     cursor: pointer;
     border-radius: 8px;
+    border: 1px solid rgba(0, 0, 0, 0.8);
     overflow: hidden;
     -webkit-tap-highlight-color: transparent;
   }
@@ -234,11 +270,14 @@
       <button class="tab" data-mode="chroma">Chroma</button>
     </div>
 
+    <button class="btn view-toggle" id="view-toggle">Square view</button>
+
     <div class="keywrap">
       <div class="keyswatch" id="keyswatch"></div>
       <div class="keymeta" id="keymeta"></div>
     </div>
 
+    <div id="slider-picker">
     <div class="ctrl">
       <div class="ctrl-head">
         <label for="s-hue">Hue</label>
@@ -261,6 +300,23 @@
         <span class="ctrl-val" id="v-chroma">100%</span>
       </div>
       <input type="range" id="s-chroma" min="0" max="100" step="1" value="100">
+    </div>
+    </div><!-- /#slider-picker -->
+
+    <div id="square-picker" class="picker-hidden">
+      <div class="square" id="square" tabindex="0" role="slider" aria-label="Color square">
+        <canvas id="sq-canvas" width="160" height="160"></canvas>
+        <span class="sq-lbl sq-lbl-y" id="sq-lbl-y">L</span>
+        <span class="sq-lbl sq-lbl-x" id="sq-lbl-x">C</span>
+        <div class="sq-marker" id="sq-marker"></div>
+      </div>
+      <div class="ctrl">
+        <div class="ctrl-head">
+          <label for="s-axis" id="axis-label">Hue</label>
+          <span class="ctrl-val" id="v-axis">R</span>
+        </div>
+        <input type="range" id="s-axis" min="0" max="119" step="1" value="0">
+      </div>
     </div>
 
     <div class="ctrl">
@@ -541,6 +597,44 @@ function generate(){
 function oklchString(c){ return `oklch(${c.L.toFixed(4)} ${c.C.toFixed(4)} ${c.H.toFixed(2)})`; }
 function oklchCss(c){ return `oklch(${(c.L*100).toFixed(2)}% ${c.C.toFixed(4)} ${c.H.toFixed(2)})`; }
 
+/* ---- Square picker: axis model (dormant) ----
+   An alternate 2D picker. In each mode one axis is swept by a slider and the
+   other two fill the square (X horizontal, left=min; Y vertical, bottom=min).
+   Fully coded but inactive — the app runs in 'sliders' mode. Switch with
+   setPickerMode('square'); nothing calls it yet (no button wired). */
+const MODE_CFG = {
+  lightness: { slider:'light',  x:'chroma', y:'hue'   },
+  hue:       { slider:'hue',    x:'chroma', y:'light' },
+  chroma:    { slider:'chroma', x:'hue',    y:'light' }
+};
+const AXIS_LABEL = { hue:'Hue', light:'Lightness', chroma:'Chroma' };
+function axisFrac(axis){
+  if (axis === 'hue')   return state.hueStop / STOPS;
+  if (axis === 'light') return state.light / 100;
+  return state.chromaPct / 100;
+}
+function setAxisFrac(axis, f){
+  f = Math.min(1, Math.max(0, f));
+  if (axis === 'hue')   state.hueStop = Math.round(f * STOPS) % STOPS;
+  else if (axis === 'light') state.light = Math.round(f * 100);
+  else state.chromaPct = Math.round(f * 100);
+}
+function axisIntValue(axis){
+  if (axis === 'hue') return state.hueStop;
+  if (axis === 'light') return state.light;
+  return state.chromaPct;
+}
+function setAxisIntValue(axis, v){
+  if (axis === 'hue') state.hueStop = v;
+  else if (axis === 'light') state.light = v;
+  else state.chromaPct = v;
+}
+function axisDisplay(axis){
+  if (axis === 'hue') return stopToName(state.hueStop);
+  if (axis === 'light') return String(state.light);
+  return state.chromaPct + '%';
+}
+
 /* ---- Rendering ---- */
 const el = (id) => document.getElementById(id);
 function railGradient(sampler, segments){
@@ -561,6 +655,101 @@ function renderRails(){
   el('s-chroma').style.background = railGradient(
     // neutral gray -> the true (active-gamut) chroma boundary, smoothly sampled
     (t) => ({ L: key.L, C: t * Cmax(key.H, key.L), H: key.H }), 24);
+}
+
+/* ---- Square picker: rendering (dormant) ---- */
+// The single square-mode slider paints the rail for the axis this mode sweeps.
+function renderAxisRail(){
+  const key = keyColor(), axis = MODE_CFG[state.mode].slider;
+  let bg;
+  if (axis === 'hue')
+    bg = railGradient((t) => { const H = t * 360; return { L: key.L, C: Cmax(H, key.L), H }; }, 24);
+  else if (axis === 'light')
+    bg = railGradient((t) => gamutMap(t, key.C, key.H), 24);
+  else
+    bg = railGradient((t) => ({ L: key.L, C: t * Cmax(key.H, key.L), H: key.H }), 24);
+  el('s-axis').style.background = bg;
+}
+// Square background: fixed slider axis + X(u) + Y(v). Only changes when the
+// slider axis, mode, or active gamut changes; kept out of renderAll(). Rendered
+// into a display-p3 canvas when supported (pixels in canvas space, chroma
+// extent from the active space's Cmax).
+const SQ = 160;
+let _sqCtx = null, _sqSpace = null, _sqP3 = false;
+function sqContext(){
+  if (_sqCtx) return _sqCtx;
+  let p3 = false;
+  try {
+    const t = document.createElement('canvas').getContext('2d', { colorSpace: 'display-p3' });
+    p3 = !!(t && t.getContextAttributes && t.getContextAttributes().colorSpace === 'display-p3');
+  } catch (e) {}
+  _sqP3 = p3;
+  _sqSpace = p3 ? COLOR_SPACES.displayP3 : COLOR_SPACES.srgb;
+  _sqCtx = el('sq-canvas').getContext('2d', p3 ? { colorSpace: 'display-p3' } : undefined);
+  return _sqCtx;
+}
+function renderSquareBg(){
+  const cfg = MODE_CFG[state.mode];
+  const ctx = sqContext();
+  const img = ctx.createImageData(SQ, SQ, _sqP3 ? { colorSpace: 'display-p3' } : undefined);
+  const d = img.data;
+  const frac = {};
+  frac[cfg.slider] = axisFrac(cfg.slider);
+  let p = 0;
+  for (let py = 0; py < SQ; py++){
+    frac[cfg.y] = 1 - py/(SQ-1);
+    // when chroma is on X, H & L are constant across the row -> hoist Cmax
+    let rowCmax = null;
+    if (cfg.x === 'chroma') rowCmax = Cmax(stopToHue(frac.hue * STOPS), frac.light);
+    for (let px = 0; px < SQ; px++){
+      frac[cfg.x] = px/(SQ-1);
+      const H = stopToHue(frac.hue * STOPS), L = frac.light;
+      const cm = rowCmax !== null ? rowCmax : Cmax(H, L);          // active-space extent
+      const lin = oklchToLinear(L, frac.chroma * cm, H, _sqSpace); // canvas-space color
+      d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.r))))) * 255);
+      d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.g))))) * 255);
+      d[p++] = Math.round(Math.min(1, Math.max(0, srgbEncode(Math.min(1, Math.max(0, lin.b))))) * 255);
+      d[p++] = 255;
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+let sqBgPending = false;
+function scheduleSquareBg(){
+  if (sqBgPending) return;
+  sqBgPending = true;
+  requestAnimationFrame(() => { sqBgPending = false; renderSquareBg(); });
+}
+function positionMarker(){
+  const cfg = MODE_CFG[state.mode];
+  const m = el('sq-marker');
+  m.style.left = (axisFrac(cfg.x) * 100) + '%';
+  m.style.top  = ((1 - axisFrac(cfg.y)) * 100) + '%';
+  m.style.background = oklchCss(keyColor());
+}
+function renderSquareLabels(){
+  const cfg = MODE_CFG[state.mode];
+  el('sq-lbl-x').textContent = AXIS_LABEL[cfg.x];
+  el('sq-lbl-y').textContent = AXIS_LABEL[cfg.y];
+}
+function configureSlider(){
+  const axis = MODE_CFG[state.mode].slider, s = el('s-axis');
+  s.min = 0;
+  s.max = axis === 'hue' ? STOPS - 1 : 100;
+  s.step = 1;
+  s.value = axisIntValue(axis);
+}
+// The single seam between the two pickers. Nothing calls this yet — wire a
+// button to setPickerMode('square') / setPickerMode('sliders').
+let pickerMode = 'sliders';
+function setPickerMode(mode){
+  pickerMode = mode === 'square' ? 'square' : 'sliders';
+  const sq = pickerMode === 'square';
+  el('slider-picker').classList.toggle('picker-hidden', sq);
+  el('square-picker').classList.toggle('picker-hidden', !sq);
+  if (sq) configureSlider();
+  renderAll();
+  if (sq) renderSquareBg();
 }
 function renderKey(){
   const key = keyColor();
@@ -634,8 +823,19 @@ function renderControls(){
   el('v-range').textContent = state.range;
   el('ctrl-range').classList.toggle('hidden', state.steps === 1);
   el('pal-title').textContent = state.mode.charAt(0).toUpperCase() + state.mode.slice(1) + ' palette';
+  if (pickerMode === 'square'){
+    const axis = MODE_CFG[state.mode].slider;
+    el('axis-label').textContent = AXIS_LABEL[axis];
+    el('v-axis').textContent = axisDisplay(axis);
+  }
 }
-function renderAll(){ renderControls(); renderRails(); renderKey(); renderPalette(); }
+function renderAll(){
+  renderControls();
+  if (pickerMode === 'square'){ renderAxisRail(); positionMarker(); renderSquareLabels(); }
+  else renderRails();
+  renderKey();
+  renderPalette();
+}
 
 /* ---- Copy ---- */
 let toastTimer = null;
@@ -666,20 +866,62 @@ function copyAll(){
 document.querySelectorAll('.tab').forEach(tab => {
   tab.addEventListener('click', () => {
     document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    tab.classList.add('active'); state.mode = tab.dataset.mode; renderAll();
+    tab.classList.add('active');
+    state.mode = tab.dataset.mode;
+    if (pickerMode === 'square') configureSlider();
+    renderAll();
+    if (pickerMode === 'square') renderSquareBg();
   });
 });
 el('s-hue').addEventListener('input', e => { state.hueStop = +e.target.value; renderAll(); });
 el('s-light').addEventListener('input', e => { state.light = +e.target.value; renderAll(); });
 el('s-chroma').addEventListener('input', e => { state.chromaPct = +e.target.value; renderAll(); });
+
+// Square-picker controls (inert until setPickerMode('square') reveals them).
+el('s-axis').addEventListener('input', e => {
+  setAxisIntValue(MODE_CFG[state.mode].slider, +e.target.value);
+  renderAll();
+  scheduleSquareBg(); // fixed axis moved -> square background re-tints
+});
+const square = el('square');
+let sqDragging = false;
+function sqFromEvent(e){
+  const r = square.getBoundingClientRect();
+  const cfg = MODE_CFG[state.mode];
+  setAxisFrac(cfg.x, (e.clientX - r.left) / r.width);
+  setAxisFrac(cfg.y, 1 - (e.clientY - r.top) / r.height);
+  renderAll();
+}
+square.addEventListener('pointerdown', e => { sqDragging = true; square.setPointerCapture(e.pointerId); sqFromEvent(e); });
+square.addEventListener('pointermove', e => { if (sqDragging) sqFromEvent(e); });
+square.addEventListener('pointerup',   () => { sqDragging = false; });
+square.addEventListener('pointercancel', () => { sqDragging = false; });
+square.addEventListener('keydown', e => {
+  const cfg = MODE_CFG[state.mode];
+  const nudge = (axis, d) => setAxisFrac(axis, axisFrac(axis) + d);
+  const k = e.key;
+  if (k === 'ArrowLeft')  nudge(cfg.x, -0.01);
+  else if (k === 'ArrowRight') nudge(cfg.x, 0.01);
+  else if (k === 'ArrowUp')    nudge(cfg.y, 0.01);
+  else if (k === 'ArrowDown')  nudge(cfg.y, -0.01);
+  else return;
+  e.preventDefault();
+  renderAll();
+});
+
 el('space-select').addEventListener('change', e => {
   activeSpace = e.target.value;
   el('v-space').textContent = COLOR_SPACES[activeSpace].label;
   renderFormatButtons(); // add/remove the color() option for wide gamuts
   renderAll();
+  if (pickerMode === 'square') renderSquareBg(); // gamut envelope changed -> re-tint
 });
 el('s-steps').addEventListener('input', e => { state.steps = +e.target.value; renderAll(); });
 el('s-range').addEventListener('input', e => { state.range = +e.target.value; renderAll(); });
+el('view-toggle').addEventListener('click', () => {
+  setPickerMode(pickerMode === 'square' ? 'sliders' : 'square');
+  el('view-toggle').textContent = pickerMode === 'square' ? 'Slider view' : 'Square view';
+});
 el('copy-all').addEventListener('click', copyAll);
 el('legend-toggle').addEventListener('click', () => {
   const hidden = el('legend').classList.toggle('hidden');
